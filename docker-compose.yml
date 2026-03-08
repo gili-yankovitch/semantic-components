@@ -1,0 +1,22 @@
+services:
+  search:
+    build: .
+    ports:
+      - "8811:8811"
+    volumes:
+      - ./cache.sqlite3:/app/cache.sqlite3:ro
+      - ./semantic:/app/semantic:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8811/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
