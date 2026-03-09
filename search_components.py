@@ -56,6 +56,8 @@ def format_results(data: dict):
         source_str = "+".join(sources)
         attr_strs = [f"{k}: {v}" for k, v in attrs.items()]
 
+        datasheet = comp.get("datasheet") or ""
+
         print(f"{'─' * 78}")
         print(f"  #{rank:<3}  C{lcsc}  |  {manufacturer} {mpn}  |  score: {score:.4f}  [{source_str}]")
         if category:
@@ -68,6 +70,8 @@ def format_results(data: dict):
         if description:
             desc = description[:120] + "…" if len(description) > 120 else description
             print(f"        {desc}")
+        if datasheet:
+            print(f"        Datasheet: {datasheet}")
 
     print(f"{'─' * 78}")
 

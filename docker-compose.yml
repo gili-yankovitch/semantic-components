@@ -3,9 +3,6 @@ services:
     build: .
     ports:
       - "8811:8811"
-    volumes:
-      - ./cache.sqlite3:/app/cache.sqlite3:ro
-      - ./semantic:/app/semantic:ro
     deploy:
       resources:
         reservations:
@@ -19,4 +16,13 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s
+    restart: unless-stopped
+
+  web:
+    build: ./web
+    ports:
+      - "3080:3080"
+    depends_on:
+      search:
+        condition: service_healthy
     restart: unless-stopped

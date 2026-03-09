@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Parts Search</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0f1117;--surface:#1a1d27;--surface2:#242836;--border:#2e3345;
+  --text:#e4e6f0;--text2:#9498ad;--accent:#6c8cff;--accent2:#4a6adf;
+  --green:#34d399;--orange:#fbbf24;--red:#f87171;
+  --radius:10px;--shadow:0 2px 12px rgba(0,0,0,.35);
+}
+html{font-size:15px}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  background:var(--bg);color:var(--text);min-height:100vh;line-height:1.55}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+
+.app{max-width:960px;margin:0 auto;padding:24px 20px 80px}
+
+header{text-align:center;padding:32px 0 24px}
+header h1{font-size:1.6rem;font-weight:700;letter-spacing:-.02em}
+header p{color:var(--text2);margin-top:6px;font-size:.9rem}
+
+.search-box{position:relative;margin-bottom:8px}
+.search-box input{
+  width:100%;padding:14px 120px 14px 18px;font-size:1rem;
+  border-radius:var(--radius);border:1px solid var(--border);
+  background:var(--surface);color:var(--text);outline:none;
+  transition:border-color .15s}
+.search-box input:focus{border-color:var(--accent)}
+.search-box input::placeholder{color:var(--text2)}
+.search-box button{
+  position:absolute;right:6px;top:50%;transform:translateY(-50%);
+  padding:9px 20px;font-size:.9rem;font-weight:600;cursor:pointer;
+  background:var(--accent);color:#fff;border:none;border-radius:7px;
+  transition:background .15s}
+.search-box button:hover{background:var(--accent2)}
+
+.controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap;
+  margin-bottom:20px;font-size:.85rem;color:var(--text2)}
+.controls label{display:flex;align-items:center;gap:5px;cursor:pointer}
+.controls select,.controls input[type=number]{
+  background:var(--surface);color:var(--text);border:1px solid var(--border);
+  border-radius:6px;padding:5px 8px;font-size:.85rem;outline:none}
+.controls select:focus,.controls input[type=number]:focus{border-color:var(--accent)}
+.controls .spacer{flex:1}
+
+.status{text-align:center;padding:40px 0;color:var(--text2);font-size:.95rem}
+.status.error{color:var(--red)}
+.status .elapsed{font-size:.8rem;margin-top:4px;opacity:.7}
+
+.spinner{display:inline-block;width:22px;height:22px;
+  border:3px solid var(--border);border-top-color:var(--accent);
+  border-radius:50%;animation:spin .6s linear infinite;vertical-align:middle;margin-right:8px}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+.results{display:flex;flex-direction:column;gap:12px}
+
+.card{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius);padding:16px 20px;
+  transition:border-color .15s,box-shadow .15s}
+.card:hover{border-color:var(--accent);box-shadow:var(--shadow)}
+
+.card-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+.card-rank{font-size:.75rem;font-weight:700;color:var(--text2);
+  background:var(--surface2);border-radius:5px;padding:2px 8px;flex-shrink:0}
+.card-mpn{font-size:1.05rem;font-weight:700;color:var(--text)}
+.card-mfr{font-size:.85rem;color:var(--text2)}
+.card-links{display:flex;gap:10px;margin-left:auto;flex-shrink:0;font-size:.8rem}
+.card-links a{color:var(--accent)}
+
+.card-cat{font-size:.8rem;color:var(--text2);margin-bottom:6px}
+
+.card-desc{font-size:.88rem;color:var(--text);opacity:.85;margin-bottom:10px;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+
+.card-meta{display:flex;gap:16px;flex-wrap:wrap;font-size:.82rem;align-items:center}
+.card-meta .pill{padding:3px 10px;border-radius:20px;font-weight:600}
+.pill-price{background:rgba(108,140,255,.12);color:var(--accent)}
+.pill-stock{background:rgba(52,211,153,.1);color:var(--green)}
+.pill-stock.low{background:rgba(251,191,36,.1);color:var(--orange)}
+.pill-stock.zero{background:rgba(248,113,113,.1);color:var(--red)}
+.pill-pkg{background:var(--surface2);color:var(--text2)}
+
+.card-sources{display:flex;gap:4px;margin-left:auto}
+.source-tag{font-size:.7rem;padding:2px 7px;border-radius:4px;font-weight:600;
+  text-transform:uppercase;background:var(--surface2);color:var(--text2)}
+.source-tag.semantic{background:rgba(108,140,255,.15);color:var(--accent)}
+.source-tag.keyword{background:rgba(52,211,153,.12);color:var(--green)}
+.source-tag.partnumber{background:rgba(251,191,36,.12);color:var(--orange)}
+
+.card-attrs{margin-top:10px;display:flex;flex-wrap:wrap;gap:6px}
+.attr{font-size:.78rem;padding:3px 9px;border-radius:5px;
+  background:var(--surface2);color:var(--text2)}
+
+.examples{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin:10px 0 24px}
+.examples button{
+  background:var(--surface);border:1px solid var(--border);color:var(--text2);
+  padding:6px 14px;border-radius:20px;font-size:.82rem;cursor:pointer;
+  transition:all .15s}
+.examples button:hover{border-color:var(--accent);color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>Parts Search</h1>
+    <p>Semantic search across ~7M JLCPCB/LCSC electronic components</p>
+  </header>
+
+  <div class="search-box">
+    <input id="q" type="text" placeholder='Search components... e.g. "LDO to 3.3v"' autocomplete="off" autofocus>
+    <button id="btn-search">Search</button>
+  </div>
+
+  <div class="examples">
+    <button data-q="LDO to 3.3v">LDO to 3.3v</button>
+    <button data-q="cheap RISC-V microcontroller">cheap RISC-V MCU</button>
+    <button data-q="STM32F4">STM32F4</button>
+    <button data-q="USB-C connector">USB-C connector</button>
+    <button data-q="100nF 0402 capacitor">100nF 0402 cap</button>
+    <button data-q="RP2040">RP2040</button>
+  </div>
+
+  <div class="controls">
+    <label>Sort
+      <select id="sort">
+        <option value="relevance">Relevance</option>
+        <option value="price">Price</option>
+      </select>
+    </label>
+    <label>Results
+      <input id="top" type="number" value="20" min="1" max="200" style="width:64px">
+    </label>
+    <span class="spacer"></span>
+    <span id="health-status"></span>
+  </div>
+
+  <div id="output"><div class="status">Type a query to search components</div></div>
+</div>
+
+<script>
+const $q = document.getElementById('q');
+const $out = document.getElementById('output');
+const $sort = document.getElementById('sort');
+const $top = document.getElementById('top');
+const $health = document.getElementById('health-status');
+
+let controller = null;
+
+async function doSearch() {
+  const q = $q.value.trim();
+  if (!q) return;
+
+  if (controller) controller.abort();
+  controller = new AbortController();
+
+  $out.innerHTML = '<div class="status"><span class="spinner"></span>Searching...</div>';
+
+  const params = new URLSearchParams({q, top: $top.value, sort: $sort.value});
+  try {
+    const t0 = performance.now();
+    const res = await fetch('/api/search?' + params, {signal: controller.signal});
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    const clientMs = (performance.now() - t0).toFixed(0);
+    renderResults(data, clientMs);
+  } catch (e) {
+    if (e.name === 'AbortError') return;
+    $out.innerHTML = '<div class="status error">Search failed: ' + esc(e.message) + '</div>';
+  }
+}
+
+function renderResults(data, clientMs) {
+  if (!data.results || data.results.length === 0) {
+    $out.innerHTML = '<div class="status">No results for "' + esc(data.query) + '"'
+      + '<div class="elapsed">Server: ' + data.elapsed_ms.toFixed(0) + 'ms</div></div>';
+    return;
+  }
+
+  var html = '<div class="status" style="padding:8px 0 4px;font-size:.82rem">'
+    + data.count + ' results for "<strong>' + esc(data.query) + '</strong>"'
+    + ' <span class="elapsed" style="margin-left:8px">Server: '
+    + data.elapsed_ms.toFixed(0) + 'ms &middot; Round-trip: ' + clientMs + 'ms</span>'
+    + '</div><div class="results">';
+
+  data.results.forEach(function(c, i) {
+    var mpn = esc(c.mpn || c.mfr || '');
+    var mfr = esc(c.manufacturer || '');
+    var lcsc = c.lcsc;
+    var cat = esc(c.category || '');
+    var desc = esc(c.description || '');
+    var pkg = esc(c.package || '');
+    var ds = c.datasheet || '';
+    var price = c.price != null ? '$' + c.price.toFixed(4) : 'N/A';
+    var stock = c.stock || 0;
+
+    var stockClass = 'pill-stock';
+    if (stock === 0) stockClass += ' zero';
+    else if (stock < 100) stockClass += ' low';
+
+    var sources = (c.match_sources || []).map(function(s) {
+      return '<span class="source-tag ' + s + '">' + s + '</span>';
+    }).join('');
+
+    var attrs = '';
+    if (c.attributes) {
+      attrs = Object.entries(c.attributes).slice(0, 8).map(function(kv) {
+        return '<span class="attr">' + esc(kv[0]) + ': ' + esc(kv[1]) + '</span>';
+      }).join('');
+    }
+
+    html += '<div class="card">'
+      + '<div class="card-head">'
+      + '<span class="card-rank">#' + (i + 1) + '</span>'
+      + '<span class="card-mpn">' + mpn + '</span>'
+      + '<span class="card-mfr">' + mfr + '</span>'
+      + '<div class="card-links">'
+      + '<a href="https://www.lcsc.com/product-detail/C' + lcsc + '.html" target="_blank" rel="noopener">C' + lcsc + '</a>'
+      + (ds ? ' <a href="' + esc(ds) + '" target="_blank" rel="noopener">Datasheet</a>' : '')
+      + '</div>'
+      + '</div>'
+      + (cat ? '<div class="card-cat">' + cat + '</div>' : '')
+      + (desc ? '<div class="card-desc">' + desc + '</div>' : '')
+      + '<div class="card-meta">'
+      + '<span class="pill pill-price">' + price + '</span>'
+      + '<span class="pill ' + stockClass + '">' + stock.toLocaleString() + ' in stock</span>'
+      + (pkg ? '<span class="pill pill-pkg">' + pkg + '</span>' : '')
+      + '<div class="card-sources">' + sources + '</div>'
+      + '</div>'
+      + (attrs ? '<div class="card-attrs">' + attrs + '</div>' : '')
+      + '</div>';
+  });
+
+  html += '</div>';
+  $out.innerHTML = html;
+}
+
+function esc(s) {
+  var d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+$q.addEventListener('keydown', function(e) { if (e.key === 'Enter') doSearch(); });
+document.getElementById('btn-search').addEventListener('click', doSearch);
+$sort.addEventListener('change', function() { if ($q.value.trim()) doSearch(); });
+
+document.querySelectorAll('.examples button').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    $q.value = btn.dataset.q;
+    doSearch();
+  });
+});
+
+(async function checkHealth() {
+  try {
+    var res = await fetch('/api/health');
+    var d = await res.json();
+    $health.textContent = (d.faiss_vectors / 1e6).toFixed(1) + 'M vectors \u00b7 ' + d.model;
+    $health.style.color = 'var(--green)';
+  } catch(e) {
+    $health.textContent = 'API offline';
+    $health.style.color = 'var(--red)';
+  }
+})();
+</script>
+</body>
+</html>

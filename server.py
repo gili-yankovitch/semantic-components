@@ -26,6 +26,7 @@ import faiss
 import numpy as np
 import uvicorn
 from fastapi import FastAPI, Query
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sentence_transformers import SentenceTransformer
 
@@ -105,6 +106,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Parts Semantic Search", lifespan=lifespan)
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"])
 
 # ---------------------------------------------------------------------------
 # Data models
@@ -118,6 +120,7 @@ class Component(BaseModel):
     category: Optional[str] = None
     package: Optional[str] = None
     description: Optional[str] = None
+    datasheet: Optional[str] = None
     attributes: Optional[dict] = None
     price: Optional[float] = None
     stock: int = 0
@@ -373,7 +376,7 @@ def _fetch_components(lcsc_ids: list[int]) -> list[Component]:
     conn = state["db_conn"]
     placeholders = ",".join("?" * len(lcsc_ids))
     rows = conn.execute(
-        f"SELECT lcsc, mfr, package, description, stock, price, extra "
+        f"SELECT lcsc, mfr, package, description, stock, price, extra, datasheet "
         f"FROM components WHERE lcsc IN ({placeholders})",
         lcsc_ids,
     ).fetchall()
@@ -386,7 +389,7 @@ def _fetch_components(lcsc_ids: list[int]) -> list[Component]:
         if not row:
             continue
 
-        lcsc, mfr, package, description, stock, price_raw, extra_raw = row
+        lcsc, mfr, package, description, stock, price_raw, extra_raw, datasheet = row
 
         extra = None
         if extra_raw:
@@ -407,6 +410,12 @@ def _fetch_components(lcsc_ids: list[int]) -> list[Component]:
 
             comp.description = extra.get("description", description) or description
 
+            ds = extra.get("datasheet", {})
+            if isinstance(ds, dict):
+                comp.datasheet = ds.get("pdf") or datasheet or None
+            else:
+                comp.datasheet = datasheet or None
+
             attrs = extra.get("attributes", {})
             if attrs:
                 comp.attributes = {k: v for k, v in attrs.items() if v and v != "-"}
@@ -420,6 +429,7 @@ def _fetch_components(lcsc_ids: list[int]) -> list[Component]:
         else:
             comp.mpn = mfr
             comp.description = description or None
+            comp.datasheet = datasheet or None
 
         components.append(comp)
 

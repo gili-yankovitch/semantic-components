@@ -25,9 +25,14 @@ that popular, available parts surface first.
        ▼
 ┌──────────────┐     GET /search?q=...     ┌─────────────────┐
 │   server.py     │◄────────────────────────│  search_components.py  │
-│   (FastAPI)     │                         │  (CLI client)          │
-│   port 8811     │                         └─────────────────┘
-└──────────────┘
+│   (FastAPI)     │        :8811            │  (CLI client)          │
+│   port 8811     │◄───────┐               └─────────────────┘
+└──────────────┘   │
+                   │  /api/* proxy
+              ┌────┴───────────┐
+              │   web UI (nginx)  │
+              │   port 3080       │
+              └────────────────┘
 ```
 
 ## Prerequisites
@@ -144,10 +149,28 @@ docker compose build
 docker compose up -d
 ```
 
-The Docker setup uses `nvidia/cuda:12.6.3-runtime-ubuntu22.04` as the base
-image and requests GPU access via the NVIDIA Container Toolkit. The
-`cache.sqlite3` and `semantic/` directory are bind-mounted as read-only
-volumes (not baked into the image).
+This starts two containers:
+
+- **search** (port 8811) -- FastAPI backend with GPU/CUDA
+- **web** (port 3080) -- Web UI served by nginx, proxies `/api/*` to the backend
+
+Open **http://localhost:3080** for the web UI.
+
+The search backend uses `nvidia/cuda:12.6.3-runtime-ubuntu22.04` and requests
+GPU access via the NVIDIA Container Toolkit. The data files (`cache.sqlite3`,
+`index.faiss`, `fts.sqlite3`) are baked into the image as separate Docker
+layers so that code-only changes result in tiny pushes to a container
+registry. The web UI is a lightweight `nginx:alpine` container.
+
+## Web UI
+
+The web UI is a single-page app at `web/index.html` served by nginx on port
+3080. It provides a search bar with example queries, sort controls, and
+displays results as cards with part number, manufacturer, category,
+attributes, price, and stock info. Each result links to the LCSC product page.
+
+The nginx config in `web/nginx.conf` reverse-proxies `/api/*` requests to the
+`search` backend container so there are no CORS issues in the browser.
 
 ## API
 
@@ -226,8 +249,12 @@ The client has no GPU dependencies -- it just makes HTTP requests.
 │   ├── index.trained       # Trained empty index (for recovery)
 │   ├── fts.sqlite3         # FTS5 keyword index (~2.5 GB)
 │   └── checkpoint.json     # Indexing progress tracker
-├── Dockerfile
-├── docker-compose.yml
+├── web/
+│   ├── index.html          # Web UI (single-page app)
+│   ├── nginx.conf          # nginx config with /api reverse proxy
+│   └── Dockerfile          # nginx:alpine image for the web UI
+├── Dockerfile              # CUDA image for the search backend
+├── docker-compose.yml      # Brings up search + web containers
 ├── .dockerignore
 └── jlcparts/               # Upstream jlcparts repo (builds cache.sqlite3)
 ```

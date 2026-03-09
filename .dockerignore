@@ -1,0 +1,15 @@
+cache.old/
+*.tar.gz
+*.zip
+*.z[0-9]*
+jlcparts/
+awkprof.out
+__pycache__/
+*.pyc
+.git/
+web/
+semantic/checkpoint.json
+semantic/index.trained
+semantic/*.shm
+semantic/*.wal
+semantic/*.tmp
