@@ -135,6 +135,154 @@ class SearchResponse(BaseModel):
     results: list[Component]
 
 # ---------------------------------------------------------------------------
+# Passive component value normalization (query-time preprocessing)
+# ---------------------------------------------------------------------------
+
+# SI prefix -> multiplier (no prefix = 1.0)
+_SI_PREFIX = {
+    "p": 1e-12, "n": 1e-9, "u": 1e-6, "µ": 1e-6,
+    "m": 1e-3, "": 1e0, "k": 1e3, "K": 1e3, "M": 1e6, "G": 1e9,
+}
+
+# Unit alias (case-insensitive) -> (unit_type, db_suffix)
+_UNIT_ALIASES = {
+    "ohm": ("R", "Ω"), "ohms": ("R", "Ω"), "r": ("R", "Ω"), "Ω": ("R", "Ω"),
+    "f": ("C", "F"), "farad": ("C", "F"), "farads": ("C", "F"),
+    "h": ("L", "H"), "henry": ("L", "H"), "henrys": ("L", "H"),
+    "v": ("V", "V"), "volt": ("V", "V"), "volts": ("V", "V"),
+    "a": ("I", "A"), "amp": ("I", "A"), "ampere": ("I", "A"), "amps": ("I", "A"),
+    "w": ("P", "W"), "watt": ("P", "W"), "watts": ("P", "W"),
+}
+
+# Scale tables: list of (divisor, suffix) from largest to smallest unit.
+# "divisor" means: displayed_value = base_value / divisor.
+_SCALES = {
+    "R": [(1e6, "MΩ"), (1e3, "kΩ"), (1, "Ω"), (1e-3, "mΩ")],
+    "C": [(1, "F"), (1e-6, "uF"), (1e-9, "nF"), (1e-12, "pF")],
+    "L": [(1, "H"), (1e-3, "mH"), (1e-6, "uH"), (1e-9, "nH")],
+    "V": [(1e3, "kV"), (1, "V"), (1e-3, "mV")],
+    "I": [(1, "A"), (1e-3, "mA"), (1e-6, "uA")],
+    "P": [(1e3, "kW"), (1, "W"), (1e-3, "mW")],
+}
+
+_UTYPE_ATTR = {"R": "Resistance", "C": "Capacitance", "L": "Inductance"}
+
+_EE_SYNONYMS: dict[str, list[str]] = {
+    "smd":  ['"Surface Mount"', '"Chip Resistor"', '"Chip Capacitor"'],
+    "smt":  ['"Surface Mount"'],
+    "tht":  ['"Through Hole"', "Plugin"],
+    "mlcc": ['"Multilayer Ceramic"'],
+    "res":  ["Resistor"],
+    "cap":  ["Capacitor"],
+    "ind":  ["Inductor"],
+}
+
+_unit_alt = "|".join(re.escape(u) for u in _UNIT_ALIASES)
+_VALUE_PATTERN = re.compile(
+    rf"(\d+(?:\.\d+)?)\s*([pnuµmkKMG])?\s*({_unit_alt})(?!\w)",
+    re.IGNORECASE,
+)
+
+
+def _fmt_value(v: float, suffix: str) -> str:
+    """Format a numeric value with a unit suffix for DB matching."""
+    if v != 0 and v == int(v) and abs(v) < 1e12:
+        return f"{int(v)}{suffix}"
+    return f"{v:.4f}".rstrip("0").rstrip(".") + suffix
+
+
+def _value_to_canonical(value: float, prefix: str, unit_key: str) -> tuple[str, list[str], str]:
+    """Convert parsed (value, prefix, unit) to canonical DB form and alternatives.
+
+    Picks the scale where the displayed value is >= 1 (human-readable range),
+    then generates alternatives in adjacent scales for FTS OR-expansion.
+
+    Returns (canonical_token, alternative_tokens, unit_type).
+    """
+    if prefix in ("\u00b5", "\u03bc"):
+        prefix = "u"
+    mult = _SI_PREFIX.get(prefix, 1e0)
+    base = value * mult
+    entry = _UNIT_ALIASES.get(unit_key.lower()) or _UNIT_ALIASES.get(unit_key)
+    if not entry:
+        return ("", [], "")
+    utype, _ = entry
+    if utype not in _SCALES:
+        return ("", [], "")
+
+    scales = _SCALES[utype]
+
+    canon = None
+    canon_div = None
+    for div, suffix in scales:
+        v = base / div
+        if v >= 1:
+            canon = _fmt_value(v, suffix)
+            canon_div = div
+            break
+    if canon is None:
+        div, suffix = scales[-1]
+        canon = _fmt_value(base / div, suffix)
+        canon_div = div
+
+    alts = []
+    for div, suffix in scales:
+        if div == canon_div:
+            continue
+        v = base / div
+        if 0.001 <= abs(v) <= 999999:
+            alt = _fmt_value(v, suffix)
+            if alt != canon:
+                alts.append(alt)
+
+    return (canon, alts, utype)
+
+
+def normalize_component_query(raw_query: str) -> tuple[list[tuple[int, int, list[str]]], list[str]]:
+    """Detect passive component value patterns and return FTS replacements and semantic terms.
+
+    Returns:
+        fts_replacements: list of (start, end, tokens) for replacing spans in the FTS query
+            with OR-expanded DB-matching tokens (each gets * for prefix match).
+        semantic_terms: additional terms to append for the semantic embedding
+            (canonical form + attribute form like 'Resistance 100kΩ').
+    """
+    fts_replacements: list[tuple[int, int, list[str]]] = []
+    semantic_terms: list[str] = []
+
+    for m in _VALUE_PATTERN.finditer(raw_query):
+        try:
+            value = float(m.group(1))
+        except ValueError:
+            continue
+        prefix = (m.group(2) or "").strip()
+        unit_key = m.group(3).strip()
+
+        canon, alts, utype = _value_to_canonical(value, prefix, unit_key)
+        if not canon:
+            continue
+
+        start, end = m.span()
+        tokens = [canon]
+        for t in alts:
+            if t not in tokens:
+                tokens.append(t)
+        if "kΩ" in canon:
+            kvar = canon.replace("kΩ", "KΩ")
+            if kvar not in tokens:
+                tokens.append(kvar)
+
+        fts_replacements.append((start, end, tokens))
+
+        semantic_terms.append(canon)
+        attr = _UTYPE_ATTR.get(utype)
+        if attr:
+            semantic_terms.append(f"{attr} {canon}")
+
+    return (fts_replacements, semantic_terms)
+
+
+# ---------------------------------------------------------------------------
 # Search logic
 # ---------------------------------------------------------------------------
 
@@ -164,50 +312,94 @@ def _make_fts_query(raw_query: str) -> str:
     - Each token gets a trailing * for prefix matching so that partial part
       numbers work (e.g. 'ch32v003' matches 'CH32V003F4P6').
     - Quoted phrases are preserved.
+    - Passive component value patterns (e.g. 100k Ohm, 4.7uF) are replaced
+      with OR-expanded DB-matching tokens (e.g. 100kΩ*, 100KΩ*).
     """
-    tokens: list[str] = []
+    fts_replacements, _ = normalize_component_query(raw_query)
+    replacement_by_span = {(start, end): toks for start, end, toks in fts_replacements}
+
+    # Build segments (start, end, text, is_quoted) then merge any fully covered by a value replacement
+    segments: list[tuple[int, int, str, bool]] = []
     in_quote = False
     current: list[str] = []
-
+    seg_start = 0
+    i = 0
     for ch in raw_query:
         if ch == '"':
             if in_quote:
-                tokens.append('"' + "".join(current) + '"')
+                segments.append((seg_start, i + 1, "".join(current), True))
                 current = []
                 in_quote = False
+                seg_start = i + 1
             else:
                 if current:
-                    for sub in _tokenize_like_fts5("".join(current)):
-                        if sub.lower() not in _FTS_STOP:
-                            tokens.append(sub + "*")
+                    segments.append((seg_start, i, "".join(current), False))
                     current = []
                 in_quote = True
-        elif ch in (' ', '\t'):
-            if in_quote:
-                current.append(ch)
-            else:
-                if current:
-                    for sub in _tokenize_like_fts5("".join(current)):
-                        if sub.lower() not in _FTS_STOP:
-                            tokens.append(sub + "*")
-                    current = []
+                seg_start = i + 1
+        elif ch in (' ', '\t') and not in_quote:
+            if current:
+                segments.append((seg_start, i, "".join(current), False))
+                current = []
+            seg_start = i + 1
         else:
             current.append(ch)
-
+        i += 1
     if current:
-        if in_quote:
-            tokens.append('"' + "".join(current) + '"')
-        else:
-            for sub in _tokenize_like_fts5("".join(current)):
-                if sub.lower() not in _FTS_STOP:
+        segments.append((seg_start, len(raw_query), "".join(current), in_quote))
+
+    # Merge segments that are fully inside a replacement span into one (start, end, None, toks, False)
+    merged: list[tuple[int, int, str | None, list[str] | None, bool]] = []
+    j = 0
+    while j < len(segments):
+        seg_start, seg_end, seg_text, is_quoted = segments[j]
+        # Find a replacement that covers this segment (and possibly following segments)
+        repl_span = None
+        for (r_start, r_end), toks in replacement_by_span.items():
+            if r_start <= seg_start and seg_end <= r_end:
+                repl_span = (r_start, r_end, toks)
+                break
+        if repl_span is None:
+            merged.append((seg_start, seg_end, seg_text, None, is_quoted))
+            j += 1
+            continue
+        r_start, r_end, toks = repl_span
+        k = j
+        while k < len(segments) and segments[k][1] <= r_end:
+            k += 1
+        merged.append((r_start, r_end, None, toks, False))
+        j = k
+    segments = merged
+
+    tokens = []
+    for seg in segments:
+        _, _, seg_text, repl_toks, is_quoted = seg
+        if repl_toks is not None:
+            parts = []
+            for t in repl_toks:
+                if "." in t:
+                    parts.append(f'"{t}"*')
+                else:
+                    parts.append(t + "*")
+            tokens.append("(" + " OR ".join(parts) + ")")
+        elif is_quoted and seg_text is not None:
+            tokens.append('"' + seg_text + '"')
+        elif seg_text is not None:
+            for sub in _tokenize_like_fts5(seg_text):
+                low = sub.lower()
+                if low in _FTS_STOP:
+                    continue
+                syns = _EE_SYNONYMS.get(low)
+                if syns:
+                    parts = [sub + "*"] + [s + "*" if not s.startswith('"') else s for s in syns]
+                    tokens.append("(" + " OR ".join(parts) + ")")
+                else:
                     tokens.append(sub + "*")
 
     if not tokens:
         return raw_query
-
     if len(tokens) == 1:
         return tokens[0]
-
     return " AND ".join(tokens)
 
 
@@ -320,11 +512,13 @@ def hybrid_search(query: str, top_k: int, sort_by_price: bool = False) -> list[C
     popular, in-stock components surface above obscure zero-stock parts
     with similar relevance scores.
     """
-
     faiss_k = top_k * FAISS_OVERSAMPLE
     fts_k = top_k * FTS_OVERSAMPLE
 
-    faiss_results = search_faiss(query, faiss_k)
+    _, semantic_terms = normalize_component_query(query)
+    semantic_query = (query + " " + " ".join(semantic_terms)).strip() if semantic_terms else query
+
+    faiss_results = search_faiss(semantic_query, faiss_k)
     fts_results = search_fts(query, fts_k)
     mfr_results = search_mfr(query, top_k)
 
