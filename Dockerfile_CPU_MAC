@@ -2,15 +2,9 @@ FROM python:3.10-slim
 
 WORKDIR /app
 
-# Install CPU-only PyTorch (no CUDA) from PyPI
-RUN pip3 install --no-cache-dir \
-    torch
-
-RUN pip3 install --no-cache-dir \
-    faiss-cpu \
-    sentence-transformers \
-    fastapi \
-    uvicorn
+# Install CPU-only dependencies
+COPY requirements.cpu.txt .
+RUN pip3 install --no-cache-dir -r requirements.cpu.txt
 
 # ----- Layer strategy -----
 # Each COPY = one registry layer, pushed independently by digest.

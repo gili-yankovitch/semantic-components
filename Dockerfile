@@ -6,16 +6,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-RUN pip3 install --no-cache-dir \
-    torch --index-url https://download.pytorch.org/whl/cu126
-
-RUN pip3 install --no-cache-dir \
-    faiss-gpu-cu12 \
-    sentence-transformers \
-    fastapi \
-    uvicorn
-
-RUN python3 -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+# Install GPU/CUDA dependencies
+COPY requirements.gpu.txt .
+RUN pip3 install --no-cache-dir -r requirements.gpu.txt
 
 # ----- Layer strategy -----
 # Each COPY = one registry layer, pushed independently by digest.
