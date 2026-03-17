@@ -35,7 +35,7 @@ that popular, available parts surface first.
               └────────────────┘
 ```
 
-## Prerequisites
+## Prerequisites - indexing the DB should be preformed only on cuda enabled system
 
 - **NVIDIA GPU** with CUDA support (tested on RTX 4070)
 - **NVIDIA drivers** + [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) (for Docker)
@@ -148,6 +148,14 @@ port.
 docker compose build
 docker compose up -d
 ```
+### Docker Compose (CPU/MAC)
+
+```bash
+docker compose -f docker-compose.CPU_MAC.yml build
+docker compose -f docker-compose.CPU_MAC.yml up
+```
+
+
 
 This starts two containers:
 

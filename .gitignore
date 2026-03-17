@@ -1,0 +1,13 @@
+.z**
+cache.sqlite3
+semantic/index.faiss
+semantic/index.trained
+semantic/fts.sqlite3
+semantic/checkpoint.json
+__pycache__/
+*.pyc
+.git/
+.zip
+.z**
+cache.**
+semantic/*

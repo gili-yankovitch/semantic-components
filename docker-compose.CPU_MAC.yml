@@ -1,15 +1,10 @@
 services:
   search:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile_CPU_MAC
     ports:
       - "8811:8811"
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8811/health')"]
       interval: 30s
